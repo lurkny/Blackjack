@@ -1,6 +1,6 @@
 # Welcome to Blackjack!
 
-This project is still under development, but I am welcoming all contributions! This contract will most likely live on the Sepolia testnet, because I don't have to time or money to actually run this contract on mainnet.
+This project is still under development, but I am welcoming all contributions! This contract will most likely live on the Sepolia testnet, because I don't have the time or money to actually run this contract on mainnet.
 
 # Installation/Setup
 
