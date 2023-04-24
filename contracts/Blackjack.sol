@@ -102,7 +102,7 @@ contract BlackJack {
         require (lobbies[_lobbyid].lobbyid == _lobbyid, "Lobby does not exist");
         require(msg.value > 0, "You must bet at least 1 wei");
         require(lobbies[_lobbyid].players.length < lobbies[_lobbyid].maxPlayers, "Lobby is full");
-        require(lobbies[_lobbyid].isReady == false, "Lobby is ready");
+        require(lobbies[_lobbyid].isReady == true, "Lobby is ready");
 
         Lobby storage curr = lobbies[_lobbyid];
 
@@ -116,6 +116,7 @@ contract BlackJack {
     }
     
     function startGame(uint256 _lobbyid) public {
+        require(msg.sender == lobbies[_lobbyid].players[0], "Only the creator can start the game");
         require(lobbies[_lobbyid].isReady == true, "Lobby is not ready");
         //Need enough cards for everyone, +2 is for the dealer.
         require(lobbies[_lobbyid].deck.length > ((lobbies[_lobbyid].players.length * 2) + 2), "Not enough cards in deck");
@@ -123,7 +124,7 @@ contract BlackJack {
          Lobby storage curr = lobbies[_lobbyid];
         uint32 i;
         /*
-        *   Worried about this Flogic, this logic should work because we have a full deck.
+        *   Worried about this logic, but should work because we have a full deck.
         */
         for(i = 0; i < curr.players.length; i+=2){
             curr.playerCards[curr.players[i]][0] = curr.deck[i];
