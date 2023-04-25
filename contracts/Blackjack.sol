@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
 import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
@@ -37,7 +37,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     mapping(uint256 => DeckStatus) public requestStatus;
 
 
-        struct DeckStatus {
+    struct DeckStatus {
         uint256 fees;
         uint256 lobbyID;
         bool fulfilled;
@@ -206,14 +206,11 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
             //This is where I think there can be issues with not having enough cards.
             uint8 card = getCard(_lobbyid);
             curr.playerCards[msg.sender].push(card);
-
             emit NewCardPlayer(card, msg.sender);
-
             curr.cardTotals[msg.sender] += card;
 
             //Check if the player has busted (kinda unnecessary)
             if(curr.cardTotals[msg.sender] > 21){
-
                 curr.playerState[msg.sender] = false;
             }
         }
@@ -271,12 +268,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
          }
 
     }
-
-
-
-
-
-
 
 
 }
