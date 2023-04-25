@@ -103,10 +103,11 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         uint32 entryCutoff;
         bool isReady; 
         bool hasSettled;
+        uint16 leftToHit;
         mapping(address => uint256) cardTotals;
         mapping(address => uint256) playerBets;
         mapping(address => uint8[]) playerCards;
-        mapping(address => bool) playerState;
+        mapping(address => bool) hasStood;
         mapping(address => bool) playerTurn;
     }
 
@@ -133,6 +134,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
         curr.maxPlayers = _maxPlayers;
+        curr.leftToHit = players.length;
         emit GameCreated(request, msg.sender, msg.value);
         return true;
     }
@@ -192,8 +194,9 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     }
 
     function playCurrentHand(PlayerDecision _choice, uint256 _lobbyid) public {
+        //Check if game has already ended
         require(!lobbies[_lobbyid].hasSettled, "Game has already settled");
-        //Check if the player is in the lobby and can play
+        //Check if the player is in the lobby and can play/players play time has ended
         require((lobbies[_lobbyid].playerTurn[msg.sender] == true) || ((lobbies[_lobbyid].lastDecisionTime + 90 < block.timestamp) && (lobbies[_lobbyid].playerBets[msg.sender] > 0)), "Player has already played / Can't play yet");
         //Hit is 0, Stand is 1
         require(_choice == PlayerDecision.HIT || _choice == PlayerDecision.STAND, "Invalid choice");
@@ -206,6 +209,8 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
                 break;
             }
         }
+        //Check if user has already stood, don't let them play if so
+        require(!lobbies[_lobbyid].hasStood[player], "Player has already stood their hand");
         curr.playerTurn[player] = false;
 
         if (player != msg.sender) _choice = PlayerDecision.STAND;
@@ -220,11 +225,16 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
             curr.cardTotals[player] += card;
 
             //Check if the player has busted (kinda unnecessary)
-            if(curr.cardTotals[player] > 21){
-                curr.playerState[player] = false;
+            if(curr.cardTotals[player] >= 21){
+                lobbies[_lobbyid].leftToHit--;
+                lobbies[_lobbyid].hasStood[player] = true;
             }
+        } else {
+            lobbies[_lobbyid].leftToHit--;
+            lobbies[_lobbyid].hasStood[player] = true;
         }
-        if (player == curr.players[curr.players.length - 1]) {
+
+        if ((player == curr.players[curr.players.length - 1]) && (lobbies[_lobbyid].leftToHit == 0)) {
             settleGame(_lobbyid);
         }
     }
