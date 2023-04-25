@@ -228,12 +228,12 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
          
 
          for(uint8 i = 0; i < curr.players.length ; i++){
-            if((curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 21) || (dealerTotal > 21  && curr.cardTotals[curr.players[i]] < 21)){
+            if((curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 22) || (dealerTotal > 21  && curr.cardTotals[curr.players[i]] < 22)){
                 //Win
                 (bool sent, bytes memory data) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]] * 2}("");
                 require(sent, "Failed to send Ether");
                 emit HandResult(_lobbyid, curr.players[i], true);
-            }else if(curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 21){
+            }else if((curr.cardTotals[curr.players[i]] > 21) || (curr.cardTotals[curr.players[i]] < dealerTotal && dealerTotal < 22) ){
                 //Lose
                 emit HandResult(_lobbyid, curr.players[i], false);
             }else {
