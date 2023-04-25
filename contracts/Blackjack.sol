@@ -96,16 +96,18 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     struct Lobby{
         uint256 seed;
         address[] players;
+        uint256 lobbyid;
         uint8[] dealerCards;
+        uint16 maxPlayers;
+        uint32 lastDecisionTime;
+        uint32 entryCutoff;
+        bool isReady; 
+        bool hasSettled;
         mapping(address => uint256) cardTotals;
         mapping(address => uint256) playerBets;
         mapping(address => uint8[]) playerCards;
         mapping(address => bool) playerState;
         mapping(address => bool) playerTurn;
-        uint256 lobbyid;
-        uint16 maxPlayers;
-        bool isReady; 
-        uint256 entryCutoff;
     }
 
     modifier onlyLobbyOwner(uint256 _lobbyid) {
@@ -117,7 +119,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     constructor() ConfirmedOwner(msg.sender) VRFV2WrapperConsumerBase(linkAddress, wrapperAddress) {}
 
 
-    function createGame(uint16 _maxPlayers, uint256 _entryCutoffTime) public payable returns(bool) {
+    function createGame(uint16 _maxPlayers, uint32 _entryCutoffTime) public payable returns(bool) {
         require(msg.value > 0, "You must bet at least 1 wei");
         require(_entryCutoffTime > block.timestamp, "Game must start in the future");
 
@@ -131,10 +133,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
         curr.maxPlayers = _maxPlayers;
-        curr.isReady = false;
-        curr.playerTurn[msg.sender] = false;
-        curr.playerState[msg.sender] = false;
-
         emit GameCreated(request, msg.sender, msg.value);
         return true;
     }
@@ -153,8 +151,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         //Adds user to the lobby with their bet.
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
-        curr.playerTurn[msg.sender] = false;
-        curr.playerState[msg.sender] = false;
         emit JoinedLobby(_lobbyid, msg.sender, msg.value);
         return true;
     }
@@ -190,47 +186,46 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
         //Set the player turn to the first player
         curr.playerTurn[curr.players[0]] = true;
+        lobbies[_lobbyid].lastDecisionTime = block.timestamp;
 
         emit DealerCardUp(curr.dealerCards[1], address(this));
     }
 
     function playCurrentHand(PlayerDecision _choice, uint256 _lobbyid) public {
+        require(!lobbies[_lobbyid].hasSettled, "Game has already settled");
+        //Check if the player is in the lobby and can play
+        require((lobbies[_lobbyid].playerTurn[msg.sender] == true) || ((lobbies[_lobbyid].lastDecisionTime + 90 < block.timestamp) && (lobbies[_lobbyid].playerBets[msg.sender] > 0)), "Player has already played / Can't play yet");
         //Hit is 0, Stand is 1
         require(_choice == PlayerDecision.HIT || _choice == PlayerDecision.STAND, "Invalid choice");
-        //Check if the player is in the lobby and can play
-        require(lobbies[lobbies[_lobbyid].lobbyid].playerTurn[msg.sender] == true, "Player has already played / Can't play yet");
+
+        address player;
+        for(uint8 i = 0; i < lobbies[_lobbyid].players.length; i++){
+            if(curr.playerTurn[curr.players[i]] == true){
+                player = curr.players[i];
+                curr.playerTurn[curr.players[i+1]] = true;
+                break;
+            }
+        }
+        curr.playerTurn[player] = false;
+
+        if (player != msg.sender) _choice = PlayerDecision.STAND;
 
         Lobby storage curr = lobbies[_lobbyid];
 
         if(_choice == PlayerDecision.HIT){
             //This is where I think there can be issues with not having enough cards.
             uint8 card = getCard(_lobbyid);
-            curr.playerCards[msg.sender].push(card);
-            emit NewCardPlayer(card, msg.sender);
-            curr.cardTotals[msg.sender] += card;
+            curr.playerCards[player].push(card);
+            emit NewCardPlayer(card, player);
+            curr.cardTotals[player] += card;
 
             //Check if the player has busted (kinda unnecessary)
-            if(curr.cardTotals[msg.sender] > 21){
-                curr.playerState[msg.sender] = false;
+            if(curr.cardTotals[player] > 21){
+                curr.playerState[player] = false;
             }
         }
-         if(_choice == PlayerDecision.STAND){
-            //make the next player able to play
-            for(uint8 i = 0; i < lobbies[_lobbyid].players.length; i++){
-                if(curr.playerTurn[curr.players[i]] == true){
-                    curr.playerTurn[curr.players[i+1]] = true;
-                    curr.playerTurn[msg.sender] = false;
-                    break;
-                }
-            }
-        }
-
-        
-        if(curr.playerTurn[curr.players[curr.players.length - 1]] == true){
-            curr.playerTurn[msg.sender] = false;
+        if (player == curr.players[curr.players.length - 1]) {
             settleGame(_lobbyid);
-        } else {
-            curr.playerTurn[msg.sender] = false;
         }
     }
 
@@ -249,11 +244,11 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
             }
         }
          
-
+         lobbies[_lobbyid].hasSettled = true;
          for(uint8 i = 0; i < curr.players.length ; i++){
             if((curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 22) || (dealerTotal > 21  && curr.cardTotals[curr.players[i]] < 22)){
                 //Win
-                (bool sent, bytes memory data) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]] * 2}("");
+                (bool sent,) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]] * 2}("");
                 require(sent, "Failed to send Ether");
                 emit HandResult(_lobbyid, curr.players[i], true);
             }else if((curr.cardTotals[curr.players[i]] > 21) || (curr.cardTotals[curr.players[i]] < dealerTotal && dealerTotal < 22) ){
@@ -261,13 +256,10 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
                 emit HandResult(_lobbyid, curr.players[i], false);
             }else {
                 //Push
-                (bool sent, bytes memory data) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]]}("");
+                (bool sent,) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]]}("");
                 require(sent, "Failed to send Ether");
                 emit HandResult(_lobbyid, curr.players[i], true);
             }
          }
-
     }
-
-
 }
