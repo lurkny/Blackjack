@@ -103,10 +103,10 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         uint32 entryCutoff;
         bool isReady; 
         bool hasSettled;
+        uint16 leftToHit;
         mapping(address => uint256) cardTotals;
         mapping(address => uint256) playerBets;
         mapping(address => uint8[]) playerCards;
-        mapping(address => bool) playerState;
         mapping(address => bool) playerTurn;
     }
 
@@ -133,6 +133,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
         curr.maxPlayers = _maxPlayers;
+        curr.leftToHit = players.length;
         emit GameCreated(request, msg.sender, msg.value);
         return true;
     }
@@ -221,10 +222,13 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
             //Check if the player has busted (kinda unnecessary)
             if(curr.cardTotals[player] > 21){
-                curr.playerState[player] = false;
+                lobbies[_lobbyid].leftToHit--;
             }
+        } else {
+            lobbies[_lobbyid].leftToHit--;
         }
-        if (player == curr.players[curr.players.length - 1]) {
+
+        if ((player == curr.players[curr.players.length - 1]) && (lobbies[_lobbyid].leftToHit == 0)) {
             settleGame(_lobbyid);
         }
     }
