@@ -142,6 +142,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
     function joinGame(uint256 _lobbyid) public payable returns(bool){
         require(lobbies[_lobbyid].lobbyid == _lobbyid, "Lobby does not exist");
+        //Bug?
         require(lobbies[_lobbyid].entryCutoff <= block.timestamp, "Entering game after entry cutoff.");
         require(lobbies[_lobbyid].playerBets[msg.sender] == 0, "You are already in this lobby");
         require(msg.value > 0, "You must bet at least 1 wei");

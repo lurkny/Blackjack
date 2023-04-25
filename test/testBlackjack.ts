@@ -11,14 +11,13 @@ import abi = require(  "../LinkAbi.json");
 
 describe("Blackjack", function () {
   let Blackjack : ContractFactory, blackjack: Contract;
-  let deployer = new ethers.Wallet("WALLET_PRIVATE_KEY", ethers.provider);
+  let deployer = new ethers.Wallet("FIX", ethers.provider);
   //Hardcoded Link Token Contract
   const LinkToken = new ethers.Contract("0x779877A7B0D9E8603169DdbD7836e478b4624789", abi, deployer);
   this.beforeAll(async function () {
-    this.enableTimeouts(false);
-     
-     Blackjack = await ethers.getContractFactory("Blackjack");
-     blackjack = await Blackjack.deploy();
+
+     Blackjack = await ethers.getContractFactory("BlackJack");
+     blackjack = await Blackjack.deploy({gasLimit: 6_000_000});
     
     await blackjack.deployed();
   
@@ -26,8 +25,8 @@ describe("Blackjack", function () {
       `Blackjack.sol deployed to ${blackjack.address}`
     );
     //Send .1 eth and 10 link to contract
-    await deployer.sendTransaction({to: blackjack.address, value: ethers.utils.parseUnits("0.1", 18)});
-    await LinkToken.transfer(blackjack.address, ethers.utils.parseUnits("10.0", 18));
+    await deployer.sendTransaction({to: blackjack.address, value: ethers.utils.parseUnits("0.1", 18), gasLimit: 6_000_000});
+    await LinkToken.transfer(blackjack.address, ethers.utils.parseUnits("2.0", 18), {gasLimit: 6_000_000});
 
     console.log(
       `Sent .1 eth and 10 link to ${blackjack.address}`
@@ -40,13 +39,12 @@ describe("Blackjack", function () {
 
     it("Should create a game", async function () {
       const [player1] = await ethers.getSigners();
+      await expect(blackjack.createGame(2, (await ethers.provider.getBlock(ethers.provider.blockNumber)).timestamp + 120, {value: ethers.utils.parseUnits("0.001", 18), gasLimit: 6_000_000})).to.changeEtherBalance(blackjack, ethers.utils.parseUnits("0.001", 18));
 
-      expect(await blackjack.createGame({
-        value: ethers.utils.parseUnits("0.001", 18),
-        data: ethers.utils.solidityPack(["uint8", "uint256"], [2, Math.floor(Date.now() / 1000) + 120])
+    });
 
-    })).to.equal(true);
-
+    it("Should not create a game with invalid bet", async function () {
+      await expect(blackjack.createGame(2, (await ethers.provider.getBlock(ethers.provider.blockNumber)).timestamp + 120, {value: 0, gasLimit: 6_000_000})).to.be.reverted;
     });
 
 });
