@@ -245,10 +245,10 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         
         if(dealerTotal <= 16){
             while(dealerTotal <= 21){
-            curr.dealerCards.push(curr.deck[curr.cardIndex]);
-            emit CardsDealt(lobbies[_lobbyid].dealerCards, address(0));
-            curr.cardIndex++;
-            dealerTotal += curr.deck[curr.cardIndex];
+            uint8 card = getCard(_lobbyid);
+            curr.dealerCards.push(card);
+            emit DealerCardUp(card, address(this));
+            dealerTotal += card;
             }
         }
          
