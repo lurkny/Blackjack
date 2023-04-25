@@ -166,6 +166,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     function getCard(uint256 _lobbyid) internal view returns(uint8){
         uint256 seed = lobbies[_lobbyid].seed;
         uint8 card = deck[uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, seed))) % 52];
+        seed += uint256(keccak256(abi.encodePacked(lobbies[_lobbyid].players[(seed - 10) % lobbies[_lobbyid].players.length])));
         return card;
     }
     
