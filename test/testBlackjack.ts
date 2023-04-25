@@ -9,7 +9,7 @@ import abi = require(  "../LinkAbi.json");
 
 
 
-describe("Lock", function () {
+describe("Blackjack", function () {
   let Blackjack : ContractFactory, blackjack: Contract;
   let deployer = new ethers.Wallet("WALLET_PRIVATE_KEY", ethers.provider);
   //Hardcoded Link Token Contract

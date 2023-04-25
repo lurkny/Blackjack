@@ -95,15 +95,15 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     */
     struct Lobby{
         uint256 seed;
-        address[] players;
+        uint256 leftToHit;
         uint256 lobbyid;
+        uint256 lastDecisionTime;
         uint8[] dealerCards;
+        address[] players;
         uint16 maxPlayers;
-        uint32 lastDecisionTime;
         uint32 entryCutoff;
         bool isReady; 
         bool hasSettled;
-        uint16 leftToHit;
         mapping(address => uint256) cardTotals;
         mapping(address => uint256) playerBets;
         mapping(address => uint8[]) playerCards;
@@ -134,7 +134,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
         curr.maxPlayers = _maxPlayers;
-        curr.leftToHit = players.length;
+        curr.leftToHit = curr.players.length;
         emit GameCreated(request, msg.sender, msg.value);
         return true;
     }
@@ -201,7 +201,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         require((lobbies[_lobbyid].playerTurn[msg.sender] == true) || ((lobbies[_lobbyid].lastDecisionTime + 90 < block.timestamp) && (lobbies[_lobbyid].playerBets[msg.sender] > 0)), "Player has already played / Can't play yet");
         //Hit is 0, Stand is 1
         require(_choice == PlayerDecision.HIT || _choice == PlayerDecision.STAND, "Invalid choice");
-
+        Lobby storage curr = lobbies[_lobbyid];
         address player;
         for(uint8 i = 0; i < lobbies[_lobbyid].players.length; i++){
             if(curr.playerTurn[curr.players[i]] == true){
@@ -216,7 +216,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
         if (player != msg.sender) _choice = PlayerDecision.STAND;
 
-        Lobby storage curr = lobbies[_lobbyid];
+     
 
         if(_choice == PlayerDecision.HIT){
             //This is where I think there can be issues with not having enough cards.
