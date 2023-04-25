@@ -7,9 +7,8 @@ import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
 /*
 *   IMPORTANT NOTES:
 *   - The majority of the logic in this contract relies on the lobbyID, which is returned in createGame() and is used to identify the lobby.
-*   - Most requirements about msg.value are just placeholders for values that will be changed later.
-*   - I am worried about how the storage will work for this game, I was told that objects in the LobbyId => Lobby mapping will persist between calls.
-*   - This is not deployment ready.
+*   - Most requirements about msg.value are just placeholders for values that will be modified later.
+*
 *   
 *   A small summary of a game:
 *   1. Player 1 creates a game with a bet of 1 wei, and a max of 2 players.
@@ -93,11 +92,11 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     }
     /*
     *  Lobby struct, contains all the information about the lobby, including the players, their cards, their bets, and the deck.
-    *  There is probably a better way to organize this data.
     */
     struct Lobby{
         uint256 seed;
         address[] players;
+        uint8[] dealerCards;
         mapping(address => uint256) cardTotals;
         mapping(address => uint256) playerBets;
         mapping(address => uint8[]) playerCards;
@@ -106,7 +105,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         uint256 lobbyid;
         uint16 maxPlayers;
         bool isReady; 
-        uint8[] dealerCards;
         uint256 entryCutoff;
     }
 
@@ -128,15 +126,16 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
         //Make a request to the backend card generation, we use the ID returned by it to identify the lobby.
         uint256 request = generate();
+        Lobby storage curr = lobbies[request];
         //Lobby setup
-        lobbies[request].lobbyid = request;
-        lobbies[request].entryCutoff = _entryCutoffTime;
-        lobbies[request].players.push(msg.sender);
-        lobbies[request].playerBets[msg.sender] = msg.value;
-        lobbies[request].maxPlayers = _maxPlayers;
-        lobbies[request].isReady = false;
-        lobbies[request].playerTurn[msg.sender] = false;
-        lobbies[request].playerState[msg.sender] = false;
+        curr.lobbyid = request;
+        curr.entryCutoff = _entryCutoffTime;
+        curr.players.push(msg.sender);
+        curr.playerBets[msg.sender] = msg.value;
+        curr.maxPlayers = _maxPlayers;
+        curr.isReady = false;
+        curr.playerTurn[msg.sender] = false;
+        curr.playerState[msg.sender] = false;
 
         emit GameCreated(request, msg.sender, msg.value);
         return true;
@@ -144,8 +143,8 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
 
     function joinGame(uint256 _lobbyid) public payable returns(bool){
-        require (lobbies[_lobbyid].lobbyid == _lobbyid, "Lobby does not exist");
-        require (lobbies[_lobbyid].entryCutoff <= block.timestamp, "Entering game after entry cutoff.");
+        require(lobbies[_lobbyid].lobbyid == _lobbyid, "Lobby does not exist");
+        require(lobbies[_lobbyid].entryCutoff <= block.timestamp, "Entering game after entry cutoff.");
         require(lobbies[_lobbyid].playerBets[msg.sender] == 0, "You are already in this lobby");
         require(msg.value > 0, "You must bet at least 1 wei");
         require(lobbies[_lobbyid].players.length < lobbies[_lobbyid].maxPlayers, "Lobby is full");
@@ -219,21 +218,24 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
             }
         }
          if(_choice == PlayerDecision.STAND){
-            curr.playerTurn[msg.sender] = false;
+            
 
             //make the next player able to play
             for(uint8 i = 0; i < lobbies[_lobbyid].players.length; i++){
                 if(curr.playerTurn[curr.players[i]] == true){
                     curr.playerTurn[curr.players[i+1]] = true;
+                    curr.playerTurn[msg.sender] = false;
                     break;
                 }
             }
         }
 
-        curr.playerTurn[msg.sender] = false;
-        //if the last player has played
-        if(curr.playerTurn[curr.players[curr.players.length - 1]] == false){
+        //Code below wil not run xd
+        if(curr.playerTurn[curr.players[curr.players.length - 1]] == true){
+            curr.playerTurn[msg.sender] = false;
             settleGame(_lobbyid);
+        } else {
+            curr.playerTurn[msg.sender] = false;
         }
     }
 
