@@ -117,8 +117,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     constructor() ConfirmedOwner(msg.sender) VRFV2WrapperConsumerBase(linkAddress, wrapperAddress) {}
 
 
-
-
     function createGame(uint16 _maxPlayers, uint256 _entryCutoffTime) public payable returns(bool) {
         require(msg.value > 0, "You must bet at least 1 wei");
         require(_entryCutoffTime > block.timestamp, "Game must start in the future");
@@ -162,8 +160,10 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     }
 
     uint8[52] deck = [11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10];
+    
 
-    function getCard(uint256 _lobbyid) internal view  returns(uint8){
+    //Should be random enough
+    function getCard(uint256 _lobbyid) internal view returns(uint8){
         uint256 seed = lobbies[_lobbyid].seed;
         uint8 card = deck[uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, seed))) % 52];
         return card;
@@ -211,15 +211,13 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
             curr.cardTotals[msg.sender] += card;
 
-            //Check if the player has busted
+            //Check if the player has busted (kinda unnecessary)
             if(curr.cardTotals[msg.sender] > 21){
 
                 curr.playerState[msg.sender] = false;
             }
         }
          if(_choice == PlayerDecision.STAND){
-            
-
             //make the next player able to play
             for(uint8 i = 0; i < lobbies[_lobbyid].players.length; i++){
                 if(curr.playerTurn[curr.players[i]] == true){
@@ -230,7 +228,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
             }
         }
 
-        //Code below wil not run xd
+        
         if(curr.playerTurn[curr.players[curr.players.length - 1]] == true){
             curr.playerTurn[msg.sender] = false;
             settleGame(_lobbyid);
