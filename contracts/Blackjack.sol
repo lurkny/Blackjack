@@ -245,13 +245,11 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         Lobby storage curr  = lobbies[_lobbyid];
         uint256 dealerTotal = curr.dealerCards[0] + curr.dealerCards[1];
         
-        if(dealerTotal <= 16){
-            while(dealerTotal <= 21){
+        while (dealerTotal <= 16){
             uint8 card = getCard(_lobbyid);
             curr.dealerCards.push(card);
             emit DealerCardUp(card, address(this));
             dealerTotal += card;
-            }
         }
          
          lobbies[_lobbyid].hasSettled = true;
