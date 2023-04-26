@@ -89,7 +89,8 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
     enum PlayerDecision {
         HIT,
-        STAND
+        STAND,
+        DOUBLE_DOWN
     }
     /*
     *  Lobby struct, contains all the information about the lobby, including the players, their cards, their bets, and the deck.
@@ -142,15 +143,14 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
 
     function joinGame(uint256 _lobbyid) public payable returns(bool){
-        require(lobbies[_lobbyid].lobbyid == _lobbyid, "Lobby does not exist");
-        //Bug?
-        require(lobbies[_lobbyid].entryCutoff <= block.timestamp, "Entering game after entry cutoff.");
-        require(lobbies[_lobbyid].playerBets[msg.sender] == 0, "You are already in this lobby");
-        require(msg.value > 0, "You must bet at least 1 wei");
-        require(lobbies[_lobbyid].players.length < lobbies[_lobbyid].maxPlayers, "Lobby is full");
-        require(lobbies[_lobbyid].isReady == true, "Lobby is ready");
 
         Lobby storage curr = lobbies[_lobbyid];
+        require(curr.lobbyid == _lobbyid, "Lobby does not exist");
+        require(curr.entryCutoff <= block.timestamp, "Entering game after entry cutoff.");
+        require(curr.playerBets[msg.sender] == 0, "You are already in this lobby");
+        require(msg.value > 0, "You must bet at least 1 wei");
+        require(curr.players.length < curr.maxPlayers, "Lobby is full");
+        require(curr.isReady == true, "Lobby is ready");
 
         //Adds user to the lobby with their bet.
         curr.players.push(msg.sender);
@@ -170,12 +170,15 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         return card;
     }
     
-    function startGame(uint256 _lobbyid) public onlyLobbyOwner(_lobbyid) {
+    function startGame(uint256 _lobbyid) public onlyLobbyOwner(_lobbyid)  {
         require (lobbies[_lobbyid].entryCutoff > block.timestamp, "Starting game before entry cutoff.");
         require(lobbies[_lobbyid].isReady == true, "Lobby is not ready");
         require(lobbies[_lobbyid].players.length > 1, "Not enough players");
 
         Lobby storage curr = lobbies[_lobbyid];
+        require(curr.entryCutoff > block.timestamp, "Starting game before entry cutoff.");
+        require(curr.isReady == true, "Lobby is not ready");
+        require(curr.players.length > 1, "Not enough players");
 
         //Deal cards to the players
         for(uint256 i = 0; i < curr.players.length; i++){
@@ -196,16 +199,17 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         emit DealerCardUp(curr.dealerCards[1], address(this));
     }
 
-    function playCurrentHand(PlayerDecision _choice, uint256 _lobbyid) public {
-        //Check if game has already ended
-        require(!lobbies[_lobbyid].hasSettled, "Game has already settled");
-        //Check if the player is in the lobby and can play/players play time has ended
-        require((lobbies[_lobbyid].playerTurn[msg.sender] == true) || ((lobbies[_lobbyid].lastDecisionTime + 90 < block.timestamp) && (lobbies[_lobbyid].playerBets[msg.sender] > 0)), "Player has already played / Can't play yet");
-        //Hit is 0, Stand is 1
-        require(_choice == PlayerDecision.HIT || _choice == PlayerDecision.STAND, "Invalid choice");
+    function playCurrentHand(PlayerDecision _choice, uint256 _lobbyid) public payable {
         Lobby storage curr = lobbies[_lobbyid];
+        //Check if game has already ended
+        require(!curr.hasSettled, "Game has already settled");
+        //Check if the player is in the lobby and can play/players play time has ended
+
+        require((curr.playerTurn[msg.sender] == true) || ((curr.lastDecisionTime + 90 < block.timestamp) && (curr.playerBets[msg.sender] > 0)), "Player has already played / Can't play yet");
+        Lobby storage curr = lobbies[_lobbyid];
+
         address player;
-        for(uint8 i = 0; i < lobbies[_lobbyid].players.length; i++){
+        for(uint8 i = 0; i < curr.players.length; i++){
             if(curr.playerTurn[curr.players[i]] == true){
                 player = curr.players[i];
                 curr.playerTurn[curr.players[i+1]] = true;
@@ -213,12 +217,10 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
             }
         }
         //Check if user has already stood, don't let them play if so
-        require(!lobbies[_lobbyid].hasStood[player], "Player has already stood their hand");
+        require(!curr.hasStood[player], "Player has already stood their hand");
         curr.playerTurn[player] = false;
 
         if (player != msg.sender) _choice = PlayerDecision.STAND;
-
-     
 
         if(_choice == PlayerDecision.HIT){
             //This is where I think there can be issues with not having enough cards.
@@ -229,15 +231,24 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
             //Check if the player has busted (kinda unnecessary)
             if(curr.cardTotals[player] >= 21){
-                lobbies[_lobbyid].leftToHit--;
-                lobbies[_lobbyid].hasStood[player] = true;
+                curr.leftToHit--;
+                curr.hasStood[player] = true;
             }
+        } else if(_choice == PlayerDecision.STAND) {
+            curr.leftToHit--;
+            curr.hasStood[player] = true;
         } else {
-            lobbies[_lobbyid].leftToHit--;
-            lobbies[_lobbyid].hasStood[player] = true;
+            require(msg.value == curr.playerBets[player]);
+            curr.playerBets[player] += msg.value;
+            uint8 card = getCard(_lobbyid);
+            curr.playerCards[player].push(card);
+            emit NewCardPlayer(card, player);
+            curr.cardTotals[player] += card;
+            curr.leftToHit--;
+            curr.hasStood[player] = true;
         }
 
-        if ((player == curr.players[curr.players.length - 1]) && (lobbies[_lobbyid].leftToHit == 0)) {
+        if ((player == curr.players[curr.players.length - 1]) && (curr.leftToHit == 0)) {
             settleGame(_lobbyid);
         }
     }
@@ -248,16 +259,14 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         Lobby storage curr  = lobbies[_lobbyid];
         uint256 dealerTotal = curr.dealerCards[0] + curr.dealerCards[1];
         
-        if(dealerTotal <= 16){
-            while(dealerTotal <= 21){
+        while (dealerTotal <= 16){
             uint8 card = getCard(_lobbyid);
             curr.dealerCards.push(card);
             emit DealerCardUp(card, address(this));
             dealerTotal += card;
-            }
         }
          
-         lobbies[_lobbyid].hasSettled = true;
+         curr.hasSettled = true;
          for(uint8 i = 0; i < curr.players.length ; i++){
             if((curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 22) || (dealerTotal > 21  && curr.cardTotals[curr.players[i]] < 22)){
                 //Win
