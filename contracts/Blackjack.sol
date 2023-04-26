@@ -146,7 +146,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
         Lobby storage curr = lobbies[_lobbyid];
         require(curr.lobbyid == _lobbyid, "Lobby does not exist");
-        require(curr.entryCutoff <= block.timestamp, "Entering game after entry cutoff.");
+        require(curr.entryCutoff >= block.timestamp, "Entering game after entry cutoff.");
         require(curr.playerBets[msg.sender] == 0, "You are already in this lobby");
         require(msg.value > 0, "You must bet at least 1 wei");
         require(curr.players.length < curr.maxPlayers, "Lobby is full");
@@ -173,7 +173,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     function startGame(uint256 _lobbyid) public onlyLobbyOwner(_lobbyid)  {
         
         Lobby storage curr = lobbies[_lobbyid];
-        require(curr.entryCutoff > block.timestamp, "Starting game before entry cutoff.");
+        require(curr.entryCutoff < block.timestamp, "Starting game before entry cutoff.");
         require(curr.isReady == true, "Lobby is not ready");
         require(curr.players.length > 1, "Not enough players");
 
