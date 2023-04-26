@@ -1,14 +1,14 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
-import "./DeckGeneration.sol";
+import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
+import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
 
 /*
 *   IMPORTANT NOTES:
 *   - The majority of the logic in this contract relies on the lobbyID, which is returned in createGame() and is used to identify the lobby.
-*   - Most requirements about msg.value are just placeholders for values that will be changed later.
-*   - I am worried about how the storage will work for this game, I was told that objects in the LobbyId => Lobby mapping will persist between calls.
-*   - This is not deployment ready.
+*   - Most requirements about msg.value are just placeholders for values that will be modified later.
+*
 *   
 *   A small summary of a game:
 *   1. Player 1 creates a game with a bet of 1 wei, and a max of 2 players.
@@ -23,32 +23,68 @@ import "./DeckGeneration.sol";
 *   10. Player 1 is prompted to make a decision, either hit or stand.
 */
 
-contract BlackJack {
+contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
+
+    //Hardcoded sepolia addresses
+    address constant linkAddress = 0x779877A7B0D9E8603169DdbD7836e478b4624789;
+    address constant wrapperAddress = 0xab18414CD93297B0d12ac29E63Ca20f515b3DB46;
+    uint32 constant callbackGas = 1_000_000;
+    uint32 constant numWords = 1;
+    uint16 constant requestConfirmations = 3;
+
+    event DeckRequest(uint256 requestId);
+    event Status(uint256 requestId, bool isDone);
+    mapping(uint256 => DeckStatus) public requestStatus;
 
 
+    struct DeckStatus {
+        uint256 fees;
+        uint256 lobbyID;
+        bool fulfilled;
+    }
 
 
-    //Unused
-    address payable public owner;
-    DeckGeneration deckGeneration;
+    function generate() internal returns(uint256){
+
+        uint256 request = requestRandomness(
+            callbackGas,
+            requestConfirmations,
+            numWords
+        );
+
+        requestStatus[request] = DeckStatus({
+            fees: VRF_V2_WRAPPER.calculateRequestPrice(callbackGas),
+            lobbyID: request,
+            fulfilled: false
+        });
+        emit DeckRequest(request);
+        return request;
+    }
+
+     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords) internal override {
+        require(requestStatus[requestId].fees  > 0, "Request does not exist");
+        
+        Lobby storage curr = lobbies[requestId];
+        DeckStatus storage status = requestStatus[requestId];
+
+        status.fulfilled = true;
+        curr.lobbyid = requestId;
+        curr.isReady = true;
+        emit GameReady(requestId);
+   }
+    
 
     //Will add more events later
     event GameCreated(uint256 lobbyID, address player, uint256 bet);
     event GameReady(uint256 lobbyID);
     event JoinedLobby(uint256 lobbyID, address player, uint256 bet);
     event HandResult(uint256 lobbyID, address player, bool win);
-    event CardsDealt(uint256[] cards, address player);
+    event CardsDealt(uint8[] cards, address player);
+    event DealerCardUp(uint8 card, address dealer);
+    event NewCardPlayer(uint8 card, address player);
 
     //LobbyID => Lobby
     mapping(uint256 => Lobby) public lobbies;
-
-    //Vulnerable bc external
-    function recieveCards(uint8[52] memory deck, uint256 lobbyID) external {
-        require(msg.sender == address(deckGeneration), "Can only be called by deck contract");
-        lobbies[lobbyID].deck = deck;
-        lobbies[lobbyID].isReady = true;
-        emit GameReady(lobbyID);
-    }
 
     enum PlayerDecision {
         HIT,
@@ -56,50 +92,59 @@ contract BlackJack {
     }
     /*
     *  Lobby struct, contains all the information about the lobby, including the players, their cards, their bets, and the deck.
-    *  There is probably a better way to organize this data.
     */
     struct Lobby{
-        uint8[52] deck;
+        uint256 seed;
+        uint256 leftToHit;
+        uint256 lobbyid;
+        uint256 lastDecisionTime;
+        uint8[] dealerCards;
         address[] players;
+        uint16 maxPlayers;
+        uint32 entryCutoff;
+        bool isReady; 
+        bool hasSettled;
         mapping(address => uint256) cardTotals;
         mapping(address => uint256) playerBets;
-        mapping(address => uint256[]) playerCards;
-        mapping(address => bool) playerState;
+        mapping(address => uint8[]) playerCards;
+        mapping(address => bool) hasStood;
         mapping(address => bool) playerTurn;
-        uint32 cardIndex;
-        uint256 lobbyid;
-        uint16 maxPlayers;
-        bool isReady; 
-        uint256[] dealerCards;
+    }
+
+    modifier onlyLobbyOwner(uint256 _lobbyid) {
+        require(msg.sender == lobbies[_lobbyid].players[0], "You are not the lobby owner");
+        _;
     }
 
 
-    constructor()  {
-        owner = payable(msg.sender);
-        deckGeneration = new DeckGeneration();
-    }
-        //TODO CARDS ARE VISIBLE IN TX DATA
-    function createGame(uint16 _maxPlayers) public payable returns(bool) {
+    constructor() ConfirmedOwner(msg.sender) VRFV2WrapperConsumerBase(linkAddress, wrapperAddress) {}
+
+
+    function createGame(uint16 _maxPlayers, uint32 _entryCutoffTime) public payable returns(bool) {
         require(msg.value > 0, "You must bet at least 1 wei");
+        require(_entryCutoffTime > block.timestamp, "Game must start in the future");
+
 
         //Make a request to the backend card generation, we use the ID returned by it to identify the lobby.
-        uint256 request = deckGeneration.generate();
+        uint256 request = generate();
+        Lobby storage curr = lobbies[request];
         //Lobby setup
-        lobbies[request].lobbyid = request;
-        lobbies[request].players.push(msg.sender);
-        lobbies[request].playerBets[msg.sender] = msg.value;
-        lobbies[request].maxPlayers = _maxPlayers;
-        lobbies[request].isReady = false;
-        lobbies[request].playerTurn[msg.sender] = false;
-        lobbies[request].playerState[msg.sender] = false;
-
+        curr.lobbyid = request;
+        curr.entryCutoff = _entryCutoffTime;
+        curr.players.push(msg.sender);
+        curr.playerBets[msg.sender] = msg.value;
+        curr.maxPlayers = _maxPlayers;
+        curr.leftToHit = curr.players.length;
         emit GameCreated(request, msg.sender, msg.value);
         return true;
     }
 
 
     function joinGame(uint256 _lobbyid) public payable returns(bool){
-        require (lobbies[_lobbyid].lobbyid == _lobbyid, "Lobby does not exist");
+        require(lobbies[_lobbyid].lobbyid == _lobbyid, "Lobby does not exist");
+        //Bug?
+        require(lobbies[_lobbyid].entryCutoff <= block.timestamp, "Entering game after entry cutoff.");
+        require(lobbies[_lobbyid].playerBets[msg.sender] == 0, "You are already in this lobby");
         require(msg.value > 0, "You must bet at least 1 wei");
         require(lobbies[_lobbyid].players.length < lobbies[_lobbyid].maxPlayers, "Lobby is full");
         require(lobbies[_lobbyid].isReady == true, "Lobby is ready");
@@ -109,107 +154,91 @@ contract BlackJack {
         //Adds user to the lobby with their bet.
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
-        curr.playerTurn[msg.sender] = false;
-        curr.playerState[msg.sender] = false;
         emit JoinedLobby(_lobbyid, msg.sender, msg.value);
         return true;
     }
+
+    uint8[52] deck = [11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10];
     
-    function startGame(uint256 _lobbyid) public {
-        require(msg.sender == lobbies[_lobbyid].players[0], "Only the creator can start the game");
-        require(lobbies[_lobbyid].isReady == true, "Lobby is not ready");
-        //Need enough cards for everyone, +2 is for the dealer.
-        require(lobbies[_lobbyid].deck.length > ((lobbies[_lobbyid].players.length * 2) + 2), "Not enough cards in deck");
 
-         Lobby storage curr = lobbies[_lobbyid];
-        uint32 i;
-        /*
-        *   Worried about this logic, but should work because we have a full deck.
-        */
-        for(i = 0; i < curr.players.length; i+=2){
-            curr.playerCards[curr.players[i]][0] = curr.deck[i];
-            curr.playerCards[curr.players[i]][1] = curr.deck[i+1];
-
-
-            emit CardsDealt(curr.playerCards[curr.players[i]], curr.players[i]);
-
-            //Not sure if the deletes are needed since I keep track of the index now.
-            delete curr.deck[i];
-            delete curr.deck[i+1];
-        }
-        //Give cards to dealer.
-        curr.dealerCards[0] = curr.deck[i+1];
-        curr.dealerCards[1] =  curr.deck[i + 2];
-        //Cards dealt to dealer
-        emit CardsDealt(curr.dealerCards, address(0));
-
-        //Not sure if the deletes are needed since I keep track of the index now.
-        delete curr.deck[i+1];
-        delete curr.deck[i+2];
-        //Set the card index
-        curr.cardIndex = i + 3;
-
-
-        if(curr.dealerCards[0] == 11){
-            //TODO: Insurance
-        }
-
-        //Counting card totals, probably will find a better way to do this.
-
-        for(uint8 j = 0; j < curr.players.length; j++){
-            curr.cardTotals[curr.players[j]] = curr.playerCards[curr.players[j]][0] + curr.playerCards[curr.players[j]][1];
-
-            //if the card total is 22, make it 12 (Double ace) - I know this isnt the right way to do this.
-            if(curr.cardTotals[curr.players[j]] == 22){
-                curr.cardTotals[curr.players[j]] = 12;
-            }
-        }
-        //Make the first player able to play.
-        curr.playerTurn[curr.players[0]] = true;
-
+    //Should be random enough
+    function getCard(uint256 _lobbyid) internal view returns(uint8){
+        uint256 seed = lobbies[_lobbyid].seed;
+        uint8 card = deck[uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, seed))) % 52];
+        seed += uint256(keccak256(abi.encodePacked(lobbies[_lobbyid].players[(seed - 10) % lobbies[_lobbyid].players.length])));
+        return card;
     }
-
-    function playCurrentHand(PlayerDecision _choice, uint256 _lobbyid) public {
-        //Hit is 0, Stand is 1
-        require(_choice == PlayerDecision.HIT || _choice == PlayerDecision.STAND, "Invalid choice");
-        //Check if the player is in the lobby and can play
-        require(lobbies[lobbies[_lobbyid].lobbyid].playerTurn[msg.sender] == true, "Player has already played / Can't play yet");
+    
+    function startGame(uint256 _lobbyid) onlyLobbyOwner(_lobbyid) public {
+        require (lobbies[_lobbyid].entryCutoff > block.timestamp, "Starting game before entry cutoff.");
+        require(lobbies[_lobbyid].isReady == true, "Lobby is not ready");
+        require(lobbies[_lobbyid].players.length > 1, "Not enough players");
 
         Lobby storage curr = lobbies[_lobbyid];
 
+        //Deal cards to the players
+        for(uint256 i = 0; i < curr.players.length; i++){
+            curr.playerCards[curr.players[i]].push(getCard(_lobbyid));
+            curr.playerCards[curr.players[i]].push(getCard(_lobbyid));
+            curr.cardTotals[curr.players[i]] = curr.playerCards[curr.players[i]][0] + curr.playerCards[curr.players[i]][1];
+            emit CardsDealt(curr.playerCards[curr.players[i]], curr.players[i]);
+        }
+
+        //Deal cards to the dealer
+        curr.dealerCards.push(getCard(_lobbyid));
+        curr.dealerCards.push(getCard(_lobbyid));
+
+        //Set the player turn to the first player
+        curr.playerTurn[curr.players[0]] = true;
+        lobbies[_lobbyid].lastDecisionTime = block.timestamp;
+
+        emit DealerCardUp(curr.dealerCards[1], address(this));
+    }
+
+    function playCurrentHand(PlayerDecision _choice, uint256 _lobbyid) public {
+        //Check if game has already ended
+        require(!lobbies[_lobbyid].hasSettled, "Game has already settled");
+        //Check if the player is in the lobby and can play/players play time has ended
+        require((lobbies[_lobbyid].playerTurn[msg.sender] == true) || ((lobbies[_lobbyid].lastDecisionTime + 90 < block.timestamp) && (lobbies[_lobbyid].playerBets[msg.sender] > 0)), "Player has already played / Can't play yet");
+        //Hit is 0, Stand is 1
+        require(_choice == PlayerDecision.HIT || _choice == PlayerDecision.STAND, "Invalid choice");
+        Lobby storage curr = lobbies[_lobbyid];
+        address player;
+        for(uint8 i = 0; i < lobbies[_lobbyid].players.length; i++){
+            if(curr.playerTurn[curr.players[i]] == true){
+                player = curr.players[i];
+                curr.playerTurn[curr.players[i+1]] = true;
+                break;
+            }
+        }
+        //Check if user has already stood, don't let them play if so
+        require(!lobbies[_lobbyid].hasStood[player], "Player has already stood their hand");
+        curr.playerTurn[player] = false;
+
+        if (player != msg.sender) _choice = PlayerDecision.STAND;
+
+     
+
         if(_choice == PlayerDecision.HIT){
             //This is where I think there can be issues with not having enough cards.
-            curr.playerCards[msg.sender].push(curr.deck[curr.cardIndex]);
+            uint8 card = getCard(_lobbyid);
+            curr.playerCards[player].push(card);
+            emit NewCardPlayer(card, player);
+            curr.cardTotals[player] += card;
 
-            emit CardsDealt(curr.playerCards[msg.sender], msg.sender);
-
-            curr.cardIndex++;
-            curr.cardTotals[msg.sender] += curr.playerCards[msg.sender][curr.playerCards[msg.sender].length - 1];
-
-            //Check if the player has busted
-            if(curr.cardTotals[msg.sender] > 21){
-
-                curr.playerState[msg.sender] = false;
+            //Check if the player has busted (kinda unnecessary)
+            if(curr.cardTotals[player] >= 21){
+                lobbies[_lobbyid].leftToHit--;
+                lobbies[_lobbyid].hasStood[player] = true;
             }
+        } else {
+            lobbies[_lobbyid].leftToHit--;
+            lobbies[_lobbyid].hasStood[player] = true;
         }
-         if(_choice == PlayerDecision.STAND){
-            curr.playerTurn[msg.sender] = false;
 
-            //make the next player able to play
-            for(uint8 i = 0; i < lobbies[_lobbyid].players.length; i++){
-                if(curr.playerTurn[curr.players[i]] == true){
-                    curr.playerTurn[curr.players[i+1]] = true;
-                    break;
-                }
-            }
-        }
-        //if the last player has played
-        curr.playerTurn[msg.sender] = false;
-
-        if(curr.playerTurn[curr.players[curr.players.length - 1]] == false){
+        if ((player == curr.players[curr.players.length - 1]) && (lobbies[_lobbyid].leftToHit == 0)) {
             settleGame(_lobbyid);
         }
-        //WILL WRITE REST OF THE LOGIC LATER
     }
 
 
@@ -220,38 +249,29 @@ contract BlackJack {
         
         if(dealerTotal <= 16){
             while(dealerTotal <= 21){
-            curr.dealerCards.push(curr.deck[curr.cardIndex]);
-            emit CardsDealt(lobbies[_lobbyid].dealerCards, address(0));
-            curr.cardIndex++;
-            dealerTotal += curr.deck[curr.cardIndex];
+            uint8 card = getCard(_lobbyid);
+            curr.dealerCards.push(card);
+            emit DealerCardUp(card, address(this));
+            dealerTotal += card;
             }
         }
          
-
+         lobbies[_lobbyid].hasSettled = true;
          for(uint8 i = 0; i < curr.players.length ; i++){
-            if((curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 21) || (dealerTotal > 21  && curr.cardTotals[curr.players[i]] < 21)){
+            if((curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 22) || (dealerTotal > 21  && curr.cardTotals[curr.players[i]] < 22)){
                 //Win
-                (bool sent, bytes memory data) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]] * 2}("");
+                (bool sent,) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]] * 2}("");
                 require(sent, "Failed to send Ether");
                 emit HandResult(_lobbyid, curr.players[i], true);
-            }else if(curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 21){
+            }else if((curr.cardTotals[curr.players[i]] > 21) || (curr.cardTotals[curr.players[i]] < dealerTotal && dealerTotal < 22) ){
                 //Lose
                 emit HandResult(_lobbyid, curr.players[i], false);
             }else {
                 //Push
-                (bool sent, bytes memory data) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]]}("");
+                (bool sent,) = payable(curr.players[i]).call{value: curr.playerBets[curr.players[i]]}("");
                 require(sent, "Failed to send Ether");
                 emit HandResult(_lobbyid, curr.players[i], true);
             }
          }
-
     }
-
-
-
-
-
-
-
-
 }
