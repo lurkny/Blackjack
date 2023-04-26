@@ -96,15 +96,15 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     */
     struct Lobby{
         uint256 seed;
-        address[] players;
+        uint256 leftToHit;
         uint256 lobbyid;
+        uint256 lastDecisionTime;
         uint8[] dealerCards;
+        address[] players;
         uint16 maxPlayers;
-        uint32 lastDecisionTime;
         uint32 entryCutoff;
         bool isReady; 
         bool hasSettled;
-        uint16 leftToHit;
         mapping(address => uint256) cardTotals;
         mapping(address => uint256) playerBets;
         mapping(address => uint8[]) playerCards;
@@ -135,13 +135,14 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
         curr.maxPlayers = _maxPlayers;
-        curr.leftToHit = players.length;
+        curr.leftToHit = curr.players.length;
         emit GameCreated(request, msg.sender, msg.value);
         return true;
     }
 
 
     function joinGame(uint256 _lobbyid) public payable returns(bool){
+
         Lobby storage curr = lobbies[_lobbyid];
         require(curr.lobbyid == _lobbyid, "Lobby does not exist");
         require(curr.entryCutoff <= block.timestamp, "Entering game after entry cutoff.");
@@ -164,6 +165,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     function getCard(uint256 _lobbyid) internal view returns(uint8){
         uint256 seed = lobbies[_lobbyid].seed;
         uint8 card = deck[uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, seed))) % 52];
+        seed += uint256(keccak256(abi.encodePacked(lobbies[_lobbyid].players[(seed - 10) % lobbies[_lobbyid].players.length])));
         return card;
     }
     
@@ -197,8 +199,10 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         //Check if game has already ended
         require(!curr.hasSettled, "Game has already settled");
         //Check if the player is in the lobby and can play/players play time has ended
+
         require((curr.playerTurn[msg.sender] == true) || ((curr.lastDecisionTime + 90 < block.timestamp) && (curr.playerBets[msg.sender] > 0)), "Player has already played / Can't play yet");
-        
+        Lobby storage curr = lobbies[_lobbyid];
+
         address player;
         for(uint8 i = 0; i < curr.players.length; i++){
             if(curr.playerTurn[curr.players[i]] == true){
@@ -212,7 +216,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         curr.playerTurn[player] = false;
 
         if (player != msg.sender) _choice = PlayerDecision.STAND;
-
 
         if(_choice == PlayerDecision.HIT){
             //This is where I think there can be issues with not having enough cards.
@@ -251,13 +254,11 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         Lobby storage curr  = lobbies[_lobbyid];
         uint256 dealerTotal = curr.dealerCards[0] + curr.dealerCards[1];
         
-        if(dealerTotal <= 16){
-            while(dealerTotal <= 21){
+        while (dealerTotal <= 16){
             uint8 card = getCard(_lobbyid);
             curr.dealerCards.push(card);
             emit DealerCardUp(card, address(this));
             dealerTotal += card;
-            }
         }
          
          curr.hasSettled = true;
