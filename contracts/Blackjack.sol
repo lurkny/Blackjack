@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.9;
+pragma solidity ^0.8.18.0;
 
 import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
 import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
@@ -26,11 +26,11 @@ import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
 contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
     //Hardcoded sepolia addresses
-    address constant linkAddress = 0x779877A7B0D9E8603169DdbD7836e478b4624789;
-    address constant wrapperAddress = 0xab18414CD93297B0d12ac29E63Ca20f515b3DB46;
-    uint32 constant callbackGas = 1_000_000;
-    uint32 constant numWords = 1;
-    uint16 constant requestConfirmations = 3;
+    address constant private link_address = 0x779877A7B0D9E8603169DdbD7836e478b4624789;
+    address constant private wrapper_address = 0xab18414CD93297B0d12ac29E63Ca20f515b3DB46;
+    uint32 constant private callback_gas = 1_000_000;
+    uint32 constant  private num_words = 1;
+    uint16 constant private request_confirmations = 3;
 
     event DeckRequest(uint256 requestId);
     event Status(uint256 requestId, bool isDone);
@@ -47,13 +47,13 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     function generate() internal returns(uint256){
 
         uint256 request = requestRandomness(
-            callbackGas,
-            requestConfirmations,
-            numWords
+            callback_gas,
+            request_confirmations,
+            num_words
         );
 
         requestStatus[request] = DeckStatus({
-            fees: VRF_V2_WRAPPER.calculateRequestPrice(callbackGas),
+            fees: VRF_V2_WRAPPER.calculateRequestPrice(callback_gas),
             lobbyID: request,
             fulfilled: false
         });
@@ -69,6 +69,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
         status.fulfilled = true;
         curr.lobbyid = requestId;
+        curr.seed = randomWords[0];
         curr.isReady = true;
         emit GameReady(requestId);
    }
@@ -117,7 +118,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     }
 
 
-    constructor() ConfirmedOwner(msg.sender) VRFV2WrapperConsumerBase(linkAddress, wrapperAddress) {}
+    constructor() ConfirmedOwner(msg.sender) VRFV2WrapperConsumerBase(link_address, wrapper_address) {}
 
 
     function createGame(uint16 _maxPlayers, uint32 _entryCutoffTime) public payable returns(bool) {
@@ -169,7 +170,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         return card;
     }
     
-    function startGame(uint256 _lobbyid) onlyLobbyOwner(_lobbyid) public {
+    function startGame(uint256 _lobbyid) public onlyLobbyOwner(_lobbyid) {
         require (lobbies[_lobbyid].entryCutoff > block.timestamp, "Starting game before entry cutoff.");
         require(lobbies[_lobbyid].isReady == true, "Lobby is not ready");
         require(lobbies[_lobbyid].players.length > 1, "Not enough players");
