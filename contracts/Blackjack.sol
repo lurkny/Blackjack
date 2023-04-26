@@ -171,10 +171,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     }
     
     function startGame(uint256 _lobbyid) public onlyLobbyOwner(_lobbyid)  {
-        require (lobbies[_lobbyid].entryCutoff > block.timestamp, "Starting game before entry cutoff.");
-        require(lobbies[_lobbyid].isReady == true, "Lobby is not ready");
-        require(lobbies[_lobbyid].players.length > 1, "Not enough players");
-
+        
         Lobby storage curr = lobbies[_lobbyid];
         require(curr.entryCutoff > block.timestamp, "Starting game before entry cutoff.");
         require(curr.isReady == true, "Lobby is not ready");
