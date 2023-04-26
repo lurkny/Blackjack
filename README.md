@@ -15,9 +15,13 @@ No script has been written to deploy this contract. If you want to make your own
 ## Features
 
 -Create lobbies to play with friends.
+
 -Game is played in order, with time allocaed for each player to play.
+
 -AFK Player Protection, game will automatically stand AFK players.
+
 -Provably fair card selections.
+
 -No registration needed
 
 
