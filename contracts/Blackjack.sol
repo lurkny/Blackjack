@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18.0;
+pragma solidity ^0.8.18;
 
 import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
 import "@chainlink/contracts/src/v0.8/VRFV2WrapperConsumerBase.sol";
@@ -43,7 +43,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         bool fulfilled;
     }
 
-
+    
     function generate() internal returns(uint256){
 
         uint256 request = requestRandomness(
@@ -85,7 +85,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     event NewCardPlayer(uint8 card, address player);
 
     //LobbyID => Lobby
-    mapping(uint256 => Lobby) public lobbies;
+    mapping(uint256 => Lobby) private lobbies;
 
     enum PlayerDecision {
         HIT,
@@ -96,21 +96,18 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     *  Lobby struct, contains all the information about the lobby, including the players, their cards, their bets, and the deck.
     */
     struct Lobby{
+        //Not visible
         uint256 seed;
-        uint256 leftToHit;
         uint256 lobbyid;
-        uint256 lastDecisionTime;
         uint8[] dealerCards;
         address[] players;
         uint16 maxPlayers;
-        uint32 entryCutoff;
         bool isReady; 
-        bool hasSettled;
         mapping(address => uint256) cardTotals;
+        mapping(address => bool) isComplete;
+        mapping(address => bool) hasWon;
         mapping(address => uint256) playerBets;
         mapping(address => uint8[]) playerCards;
-        mapping(address => bool) hasStood;
-        mapping(address => bool) playerTurn;
     }
 
     modifier onlyLobbyOwner(uint256 _lobbyid) {
@@ -121,10 +118,9 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
     constructor() ConfirmedOwner(msg.sender) VRFV2WrapperConsumerBase(link_address, wrapper_address) {}
 
-
-    function createGame(uint16 _maxPlayers, uint32 _entryCutoffTime) public payable returns(bool) {
+    //Entry point
+    function createGame(uint16 _maxPlayers) public payable returns(bool) {
         require(msg.value > 0, "You must bet at least 1 wei");
-        require(_entryCutoffTime > block.timestamp, "Game must start in the future");
 
 
         //Make a request to the backend card generation, we use the ID returned by it to identify the lobby.
@@ -132,11 +128,11 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         Lobby storage curr = lobbies[request];
         //Lobby setup
         curr.lobbyid = request;
-        curr.entryCutoff = _entryCutoffTime;
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
         curr.maxPlayers = _maxPlayers;
-        curr.leftToHit = curr.players.length;
+        curr.isComplete[msg.sender] = false;
+        curr.isReady = false;
         emit GameCreated(request, msg.sender, msg.value);
         return true;
     }
@@ -146,7 +142,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
         Lobby storage curr = lobbies[_lobbyid];
         require(curr.lobbyid == _lobbyid, "Lobby does not exist");
-        require(curr.entryCutoff >= block.timestamp, "Entering game after entry cutoff.");
         require(curr.playerBets[msg.sender] == 0, "You are already in this lobby");
         require(msg.value > 0, "You must bet at least 1 wei");
         require(curr.players.length < curr.maxPlayers, "Lobby is full");
@@ -155,69 +150,66 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         //Adds user to the lobby with their bet.
         curr.players.push(msg.sender);
         curr.playerBets[msg.sender] = msg.value;
+        curr.isComplete[msg.sender] = false;
         emit JoinedLobby(_lobbyid, msg.sender, msg.value);
         return true;
     }
 
-    uint8[52] deck = [11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10];
+    uint8[52] private deck = [11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10];
     
-
     //Should be random enough
     function getCard(uint256 _lobbyid) internal view returns(uint8){
-        uint256 seed = lobbies[_lobbyid].seed;
-        uint8 card = deck[uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, seed))) % 52];
-        seed += uint256(keccak256(abi.encodePacked(lobbies[_lobbyid].players[(seed - 10) % lobbies[_lobbyid].players.length])));
+        Lobby storage curr = lobbies[_lobbyid];
+        uint8 card = deck[uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, curr.seed))) % 52];
         return card;
     }
+
     
     function startGame(uint256 _lobbyid) public onlyLobbyOwner(_lobbyid)  {
         
         Lobby storage curr = lobbies[_lobbyid];
-        require(curr.entryCutoff < block.timestamp, "Starting game before entry cutoff.");
         require(curr.isReady == true, "Lobby is not ready");
-        require(curr.players.length > 1, "Not enough players");
+        require(curr.players.length >= 1, "Not enough players");
 
-        //Deal cards to the players
-        for(uint256 i = 0; i < curr.players.length; i++){
-            curr.playerCards[curr.players[i]].push(getCard(_lobbyid));
-            curr.playerCards[curr.players[i]].push(getCard(_lobbyid));
-            curr.cardTotals[curr.players[i]] = curr.playerCards[curr.players[i]][0] + curr.playerCards[curr.players[i]][1];
+        //Deal cards
+        curr.dealerCards.push(getCard(_lobbyid));
+
+        for(uint8 i = 0; i < curr.players.length; i++){
+            uint8 card1 = getCard(_lobbyid);
+            uint8 card2 = getCard(_lobbyid);
+
+            
+            curr.playerCards[curr.players[i]].push(card1);
+            curr.playerCards[curr.players[i]].push(card2);
+            curr.cardTotals[curr.players[i]] += card1+card2;
+
             emit CardsDealt(curr.playerCards[curr.players[i]], curr.players[i]);
         }
 
         //Deal cards to the dealer
+        
         curr.dealerCards.push(getCard(_lobbyid));
-        curr.dealerCards.push(getCard(_lobbyid));
-
-        //Set the player turn to the first player
-        curr.playerTurn[curr.players[0]] = true;
-        lobbies[_lobbyid].lastDecisionTime = block.timestamp;
 
         emit DealerCardUp(curr.dealerCards[1], address(this));
     }
 
     function playCurrentHand(PlayerDecision _choice, uint256 _lobbyid) public payable {
         Lobby storage curr = lobbies[_lobbyid];
+        address player = msg.sender;
         //Check if game has already ended
-        require(!curr.hasSettled, "Game has already settled");
-        //Check if the player is in the lobby and can play/players play time has ended
-
-        require((curr.playerTurn[msg.sender] == true) || ((curr.lastDecisionTime + 90 < block.timestamp) && (curr.playerBets[msg.sender] > 0)), "Player has already played / Can't play yet");
-        Lobby storage curr = lobbies[_lobbyid];
-
-        address player;
-        for(uint8 i = 0; i < curr.players.length; i++){
-            if(curr.playerTurn[curr.players[i]] == true){
-                player = curr.players[i];
-                curr.playerTurn[curr.players[i+1]] = true;
-                break;
-            }
+        require(curr.isComplete[player] == false, "You have already completed your hand");
+        require(curr.lobbyid == _lobbyid, "Lobby does not exist");
+        
+        if(msg.value == (curr.playerBets[msg.sender] * 2) && _choice == PlayerDecision.DOUBLE_DOWN){
+            curr.playerBets[player] += msg.value;
+            
+            uint8 card = getCard(_lobbyid);
+            curr.playerCards[player].push(card);
+            curr.cardTotals[player] += card;
+            emit NewCardPlayer(card, player);
+            curr.isComplete[player] = true;
         }
-        //Check if user has already stood, don't let them play if so
-        require(!curr.hasStood[player], "Player has already stood their hand");
-        curr.playerTurn[player] = false;
 
-        if (player != msg.sender) _choice = PlayerDecision.STAND;
 
         if(_choice == PlayerDecision.HIT){
             //This is where I think there can be issues with not having enough cards.
@@ -226,28 +218,27 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
             emit NewCardPlayer(card, player);
             curr.cardTotals[player] += card;
 
-            //Check if the player has busted (kinda unnecessary)
-            if(curr.cardTotals[player] >= 21){
-                curr.leftToHit--;
-                curr.hasStood[player] = true;
+            if(curr.cardTotals[player] > 21){
+                curr.isComplete[player] = true;
+                curr.hasWon[player] = false;
             }
-        } else if(_choice == PlayerDecision.STAND) {
-            curr.leftToHit--;
-            curr.hasStood[player] = true;
         } else {
-            require(msg.value == curr.playerBets[player]);
-            curr.playerBets[player] += msg.value;
-            uint8 card = getCard(_lobbyid);
-            curr.playerCards[player].push(card);
-            emit NewCardPlayer(card, player);
-            curr.cardTotals[player] += card;
-            curr.leftToHit--;
-            curr.hasStood[player] = true;
+            curr.isComplete[player] = true;
         }
 
-        if ((player == curr.players[curr.players.length - 1]) && (curr.leftToHit == 0)) {
+        //Check if all players have completed their hands
+        bool allComplete = true;
+        for(uint8 i = 0; i < curr.players.length; i++){
+            if(curr.isComplete[curr.players[i]] == false){
+                allComplete = false;
+            }
+        }
+
+        if(allComplete == true){
             settleGame(_lobbyid);
         }
+
+       
     }
 
 
@@ -263,7 +254,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
             dealerTotal += card;
         }
          
-         curr.hasSettled = true;
          for(uint8 i = 0; i < curr.players.length ; i++){
             if((curr.cardTotals[curr.players[i]] > dealerTotal && curr.cardTotals[curr.players[i]] < 22) || (dealerTotal > 21  && curr.cardTotals[curr.players[i]] < 22)){
                 //Win
@@ -280,5 +270,8 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
                 emit HandResult(_lobbyid, curr.players[i], true);
             }
          }
+         
     }
+
+    
 }

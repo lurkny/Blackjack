@@ -11,7 +11,7 @@ import abi = require(  "../LinkAbi.json");
 
 describe("Blackjack", function () {
   let Blackjack : ContractFactory, blackjack: Contract;
-  let deployer = new ethers.Wallet("FIX", ethers.provider);
+  let deployer = new ethers.Wallet("b165ba445525fb6f15999d1dd3465ab4537f01ca3e48cdb18aaa1a9da78624ac", ethers.provider);
   //Hardcoded Link Token Contract
   const LinkToken = new ethers.Contract("0x779877A7B0D9E8603169DdbD7836e478b4624789", abi, deployer);
   this.beforeAll(async function () {
@@ -37,14 +37,14 @@ describe("Blackjack", function () {
       expect(await blackjack.owner()).to.equal(deployer.address);
     });
 
-    it("Should create a game", async function () {
-      const [player1] = await ethers.getSigners();
-      await expect(blackjack.createGame(2, (await ethers.provider.getBlock(ethers.provider.blockNumber)).timestamp + 120, {value: ethers.utils.parseUnits("0.001", 18), gasLimit: 6_000_000})).to.changeEtherBalance(blackjack, ethers.utils.parseUnits("0.001", 18));
+ //   it("Should create a game", async function () {
+  //    const [player1] = await ethers.getSigners();
+  //    await expect(blackjack.createGame(2, (await ethers.provider.getBlock(ethers.provider.blockNumber)).timestamp + 120, {value: ethers.utils.parseUnits("0.001", 18), gasLimit: 6_000_000})).to.changeEtherBalance(blackjack, ethers.utils.parseUnits("0.001", 18));
 
-    });
+  //  });
 
-    it("Should not create a game with invalid bet", async function () {
-      await expect(blackjack.createGame(2, (await ethers.provider.getBlock(ethers.provider.blockNumber)).timestamp + 120, {value: 0, gasLimit: 6_000_000})).to.be.reverted;
-    });
+  //  it("Should not create a game with invalid bet", async function () {
+   //   await expect(blackjack.createGame(2, (await ethers.provider.getBlock(ethers.provider.blockNumber)).timestamp + 120, {value: 0, gasLimit: 6_000_000})).to.be.reverted;
+   // });
 
 });

@@ -2,7 +2,7 @@ import { ethers } from "hardhat";
 
 async function main() {
  
-  const Blackjack = await ethers.getContractFactory("Blackjack");
+  const Blackjack = await ethers.getContractFactory("BlackJack");
   const blackjack = await Blackjack.deploy();
 
   await blackjack.deployed();
