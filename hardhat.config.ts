@@ -1,9 +1,9 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 
-const INFURA_API_KEY = "31e7fdbff4c2430bac06323d6d13bbb1";
+const INFURA_API_KEY = "FIXME";
 
-const SEPOLIA_PRIVATE_KEY = "b165ba445525fb6f15999d1dd3465ab4537f01ca3e48cdb18aaa1a9da78624ac";
+const SEPOLIA_PRIVATE_KEY = "FIXME";
 
 const config: HardhatUserConfig = {
   solidity: "0.8.18",
@@ -11,6 +11,10 @@ const config: HardhatUserConfig = {
     sepolia: {
       url: `https://sepolia.infura.io/v3/${INFURA_API_KEY}`,
       accounts: [SEPOLIA_PRIVATE_KEY]
+    },
+    phalcon: {
+      url: "https://rpc.phalcon.xyz/FIXME",
+      accounts: [`${SEPOLIA_PRIVATE_KEY}`]
     }
   },
   etherscan: {
