@@ -29,12 +29,13 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
     //Hardcoded sepolia addresses
     address constant private link_address = 0x779877A7B0D9E8603169DdbD7836e478b4624789;
-    address constant private wrapper_address = 0x5A861794B927983406fCE1D062e00b9368d97Df6;
+    address constant private wrapper_address = 0xab18414CD93297B0d12ac29E63Ca20f515b3DB46;
     uint32 constant private callback_gas = 1_000_000;
-    uint32 constant private num_words = 1;
+    uint32 constant  private num_words = 1;
     uint16 constant private request_confirmations = 3;
 
-
+    event DeckRequest(uint256 requestId);
+    event Status(uint256 requestId, bool isDone);
     mapping(uint256 => DeckStatus) private requestStatus;
 
 
@@ -77,8 +78,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
     
 
     //Will add more events later
-    event DeckRequest(uint256 requestId);
-    event Status(uint256 requestId, bool isDone);
     event GameCreated(uint256 lobbyID, address player, uint256 bet);
     event GameReady(uint256 lobbyID);
     event JoinedLobby(uint256 lobbyID, address player, uint256 bet);
@@ -106,8 +105,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         uint8[] dealerCards;
         address[] players;
         uint16 maxPlayers;
-        bool isReady;
-        bool roundInProgress;
+        bool isReady; 
         mapping(address => uint256) cardTotals;
         mapping(address => bool) isComplete;
         mapping(address => bool) hasWon;
@@ -128,8 +126,7 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         require(msg.value > 0, "You must bet at least 1 wei");
 
 
-
-        //Make a request to a Chainlink VRF, we use the ID returned by it to identify the lobby.
+        //Make a request to the backend card generation, we use the ID returned by it to identify the lobby.
         uint256 request = generate();
         Lobby storage curr = lobbies[request];
         //Lobby setup
@@ -139,7 +136,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         curr.maxPlayers = _maxPlayers;
         curr.isComplete[msg.sender] = false;
         curr.isReady = false;
-        curr.roundInProgress = false;
         emit GameCreated(request, msg.sender, msg.value);
         return true;
     }
@@ -153,7 +149,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         require(msg.value > 0, "You must bet at least 1 wei");
         require(curr.players.length < curr.maxPlayers, "Lobby is full");
         require(curr.isReady == true, "Lobby is ready");
-        require(curr.roundInProgress == false, "Round is in progress");
 
         //Adds user to the lobby with their bet.
         curr.players.push(msg.sender);
@@ -165,22 +160,19 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
 
     uint8[52] private deck = [11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10,11,2,3,4,5,6,7,8,9,10,10,10,10];
     
-
-    function getCard(uint256 _lobbyid) internal returns(uint8){
+    //Should be random enough
+    function getCard(uint256 _lobbyid) internal view returns(uint8){
         Lobby storage curr = lobbies[_lobbyid];
         uint8 card = deck[uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, curr.seed))) % 52];
-        curr.seed = uint256(keccak256(abi.encodePacked(curr.seed - curr.maxPlayers + address(this).balance)));
         return card;
     }
 
     
     function startGame(uint256 _lobbyid) public onlyLobbyOwner(_lobbyid)  {
+        
         Lobby storage curr = lobbies[_lobbyid];
-        curr.roundInProgress = true;
         require(curr.isReady == true, "Lobby is not ready");
         require(curr.players.length >= 1, "Not enough players");
-
-        
 
         //Deal cards
         curr.dealerCards.push(getCard(_lobbyid));
@@ -210,7 +202,6 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         //Check if game has already ended
         require(curr.isComplete[player] == false, "You have already completed your hand");
         require(curr.lobbyid == _lobbyid, "Lobby does not exist");
-        require (curr.roundInProgress == true, "Round is not in progress");
         
         if(msg.value == (curr.playerBets[msg.sender] * 2) && _choice == PlayerDecision.DOUBLE_DOWN){
             curr.playerBets[player] += msg.value;
@@ -290,5 +281,3 @@ contract BlackJack is VRFV2WrapperConsumerBase, ConfirmedOwner {
         emit Received(msg.sender, msg.value);
     }
 }
-
-
